@@ -68,6 +68,21 @@
       padding-right: 3rem;
       appearance: none;
     }
+    /* Filopplasting */
+    input[type="file"] {
+      width: 100%;
+      padding: 0.6rem;
+      font-size: 0.95rem;
+      border: 1px dashed #ccc;
+      border-radius: 8px;
+      box-sizing: border-box;
+      background: #fafafa;
+      cursor: pointer;
+    }
+    input[type="file"]:focus {
+      outline: 3px solid #793C8A;
+      outline-offset: 2px;
+    }
     .g-recaptcha {
       margin-top: 1.5rem;
     }
@@ -84,6 +99,17 @@
     button:hover {
       background-color: #652f76;
     }
+    button:disabled {
+      background-color: #b89cc2;
+      cursor: not-allowed;
+    }
+    /* Statusmelding (tilgjengelig for skjermlesere via aria-live) */
+    .status {
+      margin-top: 1rem;
+      font-size: 0.95rem;
+      min-height: 1.2rem;
+    }
+    .status.error { color: #b00020; }
     .modal {
       display: none;
       position: fixed;
@@ -151,9 +177,25 @@
       <div class="helper">Dersom du registrerer en feil, er det veldig nyttig for oss om du kan lime inn nettadressen til stedet feilen oppstår.</div>
       <input type="text" id="url" name="url" placeholder="https://..." />
 
+      <label for="bilder">Last opp bilder</label>
+      <div class="helper" id="bilder-hjelp">
+        Du kan legge ved skjermbilder eller bilder som viser feilen. Tillatte filtyper: PNG, JPG, GIF, WEBP. Maks 5 MB per bilde, inntil 3 bilder.
+      </div>
+      <input
+        type="file"
+        id="bilder"
+        name="bilder"
+        accept="image/png, image/jpeg, image/gif, image/webp"
+        multiple
+        aria-describedby="bilder-hjelp"
+      />
+
       <div class="g-recaptcha" data-sitekey="6LcUwT8rAAAAAFzn8ti4xRH3uax087dvhLgyRMOV"></div>
 
-      <button type="submit">Send inn</button>
+      <button type="submit" id="submitBtn">Send inn</button>
+
+      <!-- aria-live gjør at skjermlesere leser opp statusendringer -->
+      <div class="status" id="status" role="status" aria-live="polite"></div>
     </form>
   </div>
 
@@ -169,19 +211,75 @@
   <script>
     const form = document.getElementById('issueForm');
     const modal = document.getElementById('thankYouModal');
+    const statusEl = document.getElementById('status');
+    const submitBtn = document.getElementById('submitBtn');
+
+    // Maks 3 bilder, 5 MB hver. Holdes i synk med funksjonens grenser.
+    const MAX_FILES = 3;
+    const MAX_BYTES = 5 * 1024 * 1024;
+    const ALLOWED = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+
+    // Gjør om en fil til ren base64 (uten "data:...;base64,"-prefiks).
+    function fileToBase64(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result.split(',')[1]);
+        reader.onerror = () => reject(new Error('Kunne ikke lese fil.'));
+        reader.readAsDataURL(file);
+      });
+    }
+
+    function setStatus(text, isError) {
+      statusEl.textContent = text;
+      statusEl.className = isError ? 'status error' : 'status';
+    }
 
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
+      setStatus('');
+
       const title = document.getElementById('title').value;
       const bodyText = document.getElementById('body').value;
       const label = document.getElementById('label').value;
       const role = document.getElementById('role').value;
       const email = document.getElementById('email').value;
       const url = document.getElementById('url').value;
+      const fileInput = document.getElementById('bilder');
       const recaptchaToken = grecaptcha.getResponse();
 
       if (!recaptchaToken) {
-        alert("Vennligst bekreft at du ikke er en robot.");
+        setStatus('Vennligst bekreft at du ikke er en robot.', true);
+        return;
+      }
+
+      // Valider og les bilder
+      const files = Array.from(fileInput.files);
+      if (files.length > MAX_FILES) {
+        setStatus(`Du kan laste opp maks ${MAX_FILES} bilder.`, true);
+        return;
+      }
+      for (const file of files) {
+        if (!ALLOWED.includes(file.type)) {
+          setStatus(`Filtypen til "${file.name}" støttes ikke.`, true);
+          return;
+        }
+        if (file.size > MAX_BYTES) {
+          setStatus(`Bildet "${file.name}" er større enn 5 MB.`, true);
+          return;
+        }
+      }
+
+      let images = [];
+      try {
+        images = await Promise.all(
+          files.map(async (file) => ({
+            name: file.name,
+            type: file.type,
+            dataBase64: await fileToBase64(file),
+          }))
+        );
+      } catch (err) {
+        setStatus('Kunne ikke lese bildene. Prøv igjen.', true);
         return;
       }
 
@@ -189,24 +287,36 @@
       if (email.trim() !== '') fullBody += `\n\n## Kontaktinformasjon\n${email}`;
       if (url.trim() !== '') fullBody += `\n\n## Lenke\n${url}`;
 
-      const response = await fetch('/.netlify/functions/create-issue', {
-        method: 'POST',
-        body: JSON.stringify({
-          title,
-          body: fullBody,
-          label,
-          recaptcha: recaptchaToken
-        })
-      });
+      submitBtn.disabled = true;
+      setStatus('Sender inn …');
 
-      const result = await response.json();
+      try {
+        const response = await fetch('/api/create-issue', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title,
+            body: fullBody,
+            label,
+            recaptcha: recaptchaToken,
+            images,
+          }),
+        });
 
-      if (result.message && result.message.includes("Issue opprettet")) {
-        modal.style.display = 'flex';
-        form.reset();
-        grecaptcha.reset();
-      } else {
-        alert("Noe gikk galt. Prøv igjen.");
+        const result = await response.json();
+
+        if (response.ok && result.message && result.message.includes('Issue opprettet')) {
+          modal.style.display = 'flex';
+          form.reset();
+          grecaptcha.reset();
+          setStatus('');
+        } else {
+          setStatus(result.message || 'Noe gikk galt. Prøv igjen.', true);
+        }
+      } catch (err) {
+        setStatus('Nettverksfeil. Sjekk forbindelsen og prøv igjen.', true);
+      } finally {
+        submitBtn.disabled = false;
       }
     });
 
