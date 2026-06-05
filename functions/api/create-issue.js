@@ -1,25 +1,16 @@
 // Cloudflare Pages Function
 // Plassering: functions/api/create-issue.js
 // Endepunkt: /api/create-issue
-//
-// Bilder lastes opp til en PRIVAT Supabase Storage-bøtte, og funksjonen
-// limer en signert (tidsbegrenset) lenke inn i issuet. Nye issues merkes
-// i prosjektet med Område = "sendt inn fra bruker".
 
 // --- Konfigurasjon ---------------------------------------------------------
 const OWNER = 'PorticoEstate';
-const REPO = 'PorticoEstate-v2'; // mål-repoet der issuene havner
+const REPO = 'PorticoEstate-v2';
 const PROJECT_ID = 'PVT_kwDOAhowTc4AUfeE';
 
-// Område-feltet (single select) i prosjektet. Fylles inn etter at vi har
-// hentet ID-ene via det midlertidige endepunktet (se nederst).
-// Så lenge disse er tomme, hopper funksjonen pent over å sette området.
-const AREA_FIELD_ID = '';   // <-- fylles inn senere (starter med PVTSSF_)
-const AREA_OPTION_ID = '';  // <-- fylles inn senere (kort kode)
+const AREA_FIELD_ID = '';   // fylles inn senere
+const AREA_OPTION_ID = '';  // fylles inn senere
 
-// Supabase Storage
 const BUCKET = 'innsendte-bilder';
-// Hvor lenge en bildelenke er gyldig: 1 år (i sekunder).
 const SIGNED_URL_EXPIRES = 60 * 60 * 24 * 365;
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
@@ -34,7 +25,6 @@ function githubHeaders(token) {
   };
 }
 
-// Gjør om ren base64 til binærdata (Uint8Array) for opplasting.
 function base64ToBytes(base64) {
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
@@ -44,7 +34,6 @@ function base64ToBytes(base64) {
   return bytes;
 }
 
-// Last ett bilde opp til privat Supabase-bøtte og returner en markdown-lenke.
 async function uploadImageToSupabase(image, indexForName, supabaseUrl, serviceKey) {
   if (!image || !image.dataBase64) {
     throw new Error('Bilde mangler innhold.');
@@ -105,7 +94,6 @@ async function uploadImageToSupabase(image, indexForName, supabaseUrl, serviceKe
   return `![${objectPath}](${fullUrl})`;
 }
 
-// Sett Område-feltet på et prosjekt-element (kjøres bare hvis ID-ene er satt).
 async function setAreaField(projectItemId, token) {
   const res = await fetch('https://api.github.com/graphql', {
     method: 'POST',
@@ -157,7 +145,6 @@ export async function onRequestPost(context) {
 
   const { title, body, label, recaptcha, images } = parsed;
 
-  // 1) Valider reCAPTCHA
   const captchaRes = await fetch('https://www.google.com/recaptcha/api/siteverify', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -171,7 +158,6 @@ export async function onRequestPost(context) {
   }
 
   try {
-    // 2) Last opp eventuelle bilder til Supabase (privat) og bygg markdown
     let imageMarkdown = '';
     if (Array.isArray(images) && images.length > 0) {
       if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
@@ -192,7 +178,6 @@ export async function onRequestPost(context) {
 
     const fullBody = `${body || ''}${imageMarkdown}`;
 
-    // 3) Tildel assignee basert på valgt kategori (label)
     let assignee = null;
     switch (label) {
       case 'ny funksjon':
@@ -202,3 +187,86 @@ export async function onRequestPost(context) {
         assignee = 'geirsandvoll';
         break;
       case 'feil':
+        assignee = 'geirsandvoll';
+        break;
+      case 'forbedring':
+        assignee = 'ArildR82';
+        break;
+      default:
+        assignee = null;
+    }
+
+    const issuePayload = {
+      title,
+      body: fullBody,
+      labels: label ? [label] : [],
+      ...(assignee && { assignees: [assignee] }),
+    };
+
+    const issueRes = await fetch(
+      `https://api.github.com/repos/${OWNER}/${REPO}/issues`,
+      {
+        method: 'POST',
+        headers: { ...githubHeaders(GITHUB_TOKEN), 'Content-Type': 'application/json' },
+        body: JSON.stringify(issuePayload),
+      }
+    );
+
+    const issue = await issueRes.json();
+
+    if (!issueRes.ok || !issue.number) {
+      return json(issueRes.status || 500, {
+        message: 'Feil ved oppretting av issue.',
+        error: issue,
+      });
+    }
+
+    const projectRes = await fetch('https://api.github.com/graphql', {
+      method: 'POST',
+      headers: { ...githubHeaders(GITHUB_TOKEN), 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query: `
+          mutation($projectId: ID!, $contentId: ID!) {
+            addProjectV2ItemById(input: {projectId: $projectId, contentId: $contentId}) {
+              item { id }
+            }
+          }
+        `,
+        variables: {
+          projectId: PROJECT_ID,
+          contentId: issue.node_id,
+        },
+      }),
+    });
+
+    const projectData = await projectRes.json();
+
+    if (projectData.errors) {
+      return json(500, {
+        message: 'Issue ble opprettet, men kunne ikke legges til i prosjekt.',
+        errors: projectData.errors,
+      });
+    }
+
+    const projectItemId = projectData.data?.addProjectV2ItemById?.item?.id;
+    if (AREA_FIELD_ID && AREA_OPTION_ID && projectItemId) {
+      const areaResult = await setAreaField(projectItemId, GITHUB_TOKEN);
+      if (areaResult.errors) {
+        return json(200, {
+          message: `Issue opprettet! Nummer: ${issue.number} (men Område ble ikke satt)`,
+          issueNumber: issue.number,
+          issueUrl: issue.html_url,
+          areaErrors: areaResult.errors,
+        });
+      }
+    }
+
+    return json(200, {
+      message: `Issue opprettet! Nummer: ${issue.number}`,
+      issueNumber: issue.number,
+      issueUrl: issue.html_url,
+    });
+  } catch (error) {
+    return json(500, { message: 'Uventet serverfeil.', error: error.message });
+  }
+}
