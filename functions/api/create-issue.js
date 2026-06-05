@@ -5,10 +5,10 @@
 // --- Konfigurasjon ---------------------------------------------------------
 const OWNER = 'PorticoEstate';
 const REPO = 'PorticoEstate-v2';
-const PROJECT_ID = 'PVT_kwDOAhowTc4AUfeE';
+const PROJECT_ID = 'PVT_kwDOAhowTc4BKcsn';
 
-const AREA_FIELD_ID = '';   // fylles inn senere
-const AREA_OPTION_ID = '';  // fylles inn senere
+const AREA_FIELD_ID = 'PVTSSF_lADOAhowTc4BKcsnzg6cIdg';
+const AREA_OPTION_ID = '8aadc6ae';
 
 const BUCKET = 'innsendte-bilder';
 const SIGNED_URL_EXPIRES = 60 * 60 * 24 * 365;
