@@ -1,10 +1,6 @@
-// MIDLERTIDIG hjelpe-endepunkt for å hente Projects v2 felt-ID-er.
-// Åpne /api/hent-ider i nettleseren ÉN gang, noter ID-ene, og SLETT så
-// denne filen. Den eksponerer ingen hemmeligheter, men bør ikke bli liggende.
-
+// MIDLERTIDIG: henter prosjekt-ID og felt-ID-er for prosjekt 14.
 export async function onRequestGet(context) {
   const { env } = context;
-  const PROJECT_ID = 'PVT_kwDOAhowTc4AUfeE';
 
   const res = await fetch('https://api.github.com/graphql', {
     method: 'POST',
@@ -15,9 +11,11 @@ export async function onRequestGet(context) {
     },
     body: JSON.stringify({
       query: `
-        query($id: ID!) {
-          node(id: $id) {
-            ... on ProjectV2 {
+        query {
+          organization(login: "PorticoEstate") {
+            projectV2(number: 14) {
+              id
+              title
               fields(first: 50) {
                 nodes {
                   ... on ProjectV2SingleSelectField {
@@ -31,7 +29,6 @@ export async function onRequestGet(context) {
           }
         }
       `,
-      variables: { id: PROJECT_ID },
     }),
   });
 
