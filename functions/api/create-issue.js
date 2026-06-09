@@ -50,7 +50,7 @@ async function uploadImageToSupabase(image, indexForName, supabaseUrl, serviceKe
   }
 
   const ext = type.split('/')[1] || 'png';
-  const objectPath = `${Date.now()}-${indexForName}.${ext}`;
+const objectPath = `${Date.now()}-${indexForName}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
   const bytes = base64ToBytes(image.dataBase64);
 
   const uploadRes = await fetch(
