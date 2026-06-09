@@ -19,12 +19,13 @@
     select { background-image: url("data:image/svg+xml,%3Csvg fill='black' height='20' viewBox='0 0 24 24' width='20' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 1.5rem center; background-size: 1rem; padding-right: 3rem; appearance: none; }
     input[type="file"] { width: 100%; padding: 0.6rem; font-size: 0.95rem; border: 1px dashed #ccc; border-radius: 8px; box-sizing: border-box; background: #fafafa; cursor: pointer; }
     input[type="file"]:focus { outline: 3px solid #793C8A; outline-offset: 2px; }
-    /* Liste over valgte filer */
     .filliste { list-style: none; padding: 0; margin: 0.75rem 0 0; }
-    .filliste li { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; padding: 0.5rem 0.75rem; background: #f3eef5; border-radius: 8px; margin-bottom: 0.4rem; font-size: 0.9rem; }
-    .filliste .filnavn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .filliste li { padding: 0.6rem 0.75rem; background: #f3eef5; border-radius: 8px; margin-bottom: 0.5rem; font-size: 0.9rem; }
+    .filrad { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+    .filnavn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .fjern-btn { flex-shrink: 0; background: none; border: none; color: #793C8A; font-size: 1.2rem; cursor: pointer; padding: 0 0.25rem; margin: 0; line-height: 1; }
     .fjern-btn:hover { color: #b00020; }
+    .bildebeskr { width: 100%; margin-top: 0.5rem; padding: 0.5rem; font-size: 0.9rem; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; font-family: 'Roboto', sans-serif; }
     .g-recaptcha { margin-top: 1.5rem; }
     button[type="submit"] { margin-top: 2rem; padding: 0.75rem 1.5rem; background-color: #793C8A; color: white; border: none; font-size: 1rem; border-radius: 8px; cursor: pointer; }
     button[type="submit"]:hover { background-color: #652f76; }
@@ -78,7 +79,7 @@
 
       <label for="bilder">Last opp bilder</label>
       <div class="helper" id="bilder-hjelp">
-        Du kan legge ved skjermbilder eller bilder som viser feilen. Tillatte filtyper: PNG, JPG, GIF, WEBP. Maks 5 MB per bilde, inntil 3 bilder.
+        Du kan legge ved skjermbilder eller bilder som viser feilen. Tillatte filtyper: PNG, JPG, GIF, WEBP. Maks 5 MB per bilde, inntil 3 bilder. Du kan beskrive hvert bilde.
       </div>
       <input type="file" id="bilder" name="bilder" accept="image/png, image/jpeg, image/gif, image/webp" multiple aria-describedby="bilder-hjelp" />
       <ul class="filliste" id="filliste"></ul>
@@ -112,7 +113,7 @@
     const MAX_BYTES = 5 * 1024 * 1024;
     const ALLOWED = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
 
-    // Vi holder valgte filer i en egen liste, så vi kan fjerne enkeltfiler.
+    // Hvert element: { file, beskrivelse }
     let valgteFiler = [];
 
     function formatStr(bytes) {
@@ -122,33 +123,46 @@
 
     function tegnFilliste() {
       fillisteEl.innerHTML = '';
-      valgteFiler.forEach((file, i) => {
+      valgteFiler.forEach((item, i) => {
         const li = document.createElement('li');
+
+        const rad = document.createElement('div');
+        rad.className = 'filrad';
 
         const navn = document.createElement('span');
         navn.className = 'filnavn';
-        navn.textContent = `${file.name} (${formatStr(file.size)})`;
+        navn.textContent = `${item.file.name} (${formatStr(item.file.size)})`;
 
         const fjern = document.createElement('button');
         fjern.type = 'button';
         fjern.className = 'fjern-btn';
-        fjern.setAttribute('aria-label', `Fjern ${file.name}`);
+        fjern.setAttribute('aria-label', `Fjern ${item.file.name}`);
         fjern.textContent = '✕';
         fjern.onclick = () => {
           valgteFiler.splice(i, 1);
           tegnFilliste();
         };
 
-        li.appendChild(navn);
-        li.appendChild(fjern);
+        rad.appendChild(navn);
+        rad.appendChild(fjern);
+
+        const beskr = document.createElement('input');
+        beskr.type = 'text';
+        beskr.className = 'bildebeskr';
+        beskr.placeholder = 'Beskriv dette bildet (valgfritt)';
+        beskr.value = item.beskrivelse || '';
+        beskr.setAttribute('aria-label', `Beskrivelse for ${item.file.name}`);
+        // Lagre beskrivelsen mens brukeren skriver
+        beskr.oninput = (e) => { valgteFiler[i].beskrivelse = e.target.value; };
+
+        li.appendChild(rad);
+        li.appendChild(beskr);
         fillisteEl.appendChild(li);
       });
     }
 
-    // Når brukeren velger filer, legg dem til i lista (med validering).
     fileInput.addEventListener('change', () => {
       const nye = Array.from(fileInput.files);
-      // Tøm input-en igjen, så vi kan styre lista selv.
       fileInput.value = '';
 
       for (const file of nye) {
@@ -164,7 +178,7 @@
           setStatus(`Du kan laste opp maks ${MAX_FILES} bilder.`, true);
           break;
         }
-        valgteFiler.push(file);
+        valgteFiler.push({ file, beskrivelse: '' });
         setStatus('');
       }
       tegnFilliste();
@@ -204,10 +218,11 @@
       let images = [];
       try {
         images = await Promise.all(
-          valgteFiler.map(async (file) => ({
-            name: file.name,
-            type: file.type,
-            dataBase64: await fileToBase64(file),
+          valgteFiler.map(async (item) => ({
+            name: item.file.name,
+            type: item.file.type,
+            beskrivelse: item.beskrivelse || '',
+            dataBase64: await fileToBase64(item.file),
           }))
         );
       } catch (err) {
