@@ -91,7 +91,11 @@ const objectPath = `${Date.now()}-${indexForName}-${Math.random().toString(36).s
   const signData = await signRes.json();
   const fullUrl = `${supabaseUrl}/storage/v1${signData.signedURL}`;
 
-  return `![${objectPath}](${fullUrl})`;
+ const altTekst = (image.beskrivelse && image.beskrivelse.trim()) ? image.beskrivelse.trim() : objectPath;
+  if (image.beskrivelse && image.beskrivelse.trim()) {
+    return `*${image.beskrivelse.trim()}*\n\n![${altTekst}](${fullUrl})`;
+  }
+  return `![${altTekst}](${fullUrl})`;
 }
 
 async function setAreaField(projectItemId, token) {
