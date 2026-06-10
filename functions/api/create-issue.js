@@ -9,6 +9,8 @@ const PROJECT_ID = 'PVT_kwDOAhowTc4BKcsn';
 
 const AREA_FIELD_ID = 'PVTSSF_lADOAhowTc4BKcsnzg6cIdg';
 const AREA_OPTION_ID = '8aadc6ae';
+const SAKSSTATUS_FIELD_ID = 'PVTSSF_lADOAhowTc4BKcsnzhVDuuI';
+const SAKSSTATUS_NY_OPTION_ID = '27870823';
 
 const BUCKET = 'innsendte-bilder';
 const SIGNED_URL_EXPIRES = 60 * 60 * 24 * 365;
@@ -114,6 +116,7 @@ async function setAreaField(projectItemId, token) {
             projectV2Item { id }
           }
         }
+        
       `,
       variables: {
         projectId: PROJECT_ID,
@@ -125,6 +128,35 @@ async function setAreaField(projectItemId, token) {
   });
   return res.json();
 }
+
+async function setSaksstatusNy(projectItemId, token) {
+  const res = await fetch('https://api.github.com/graphql', {
+    method: 'POST',
+    headers: { ...githubHeaders(token), 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      query: `
+        mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
+          updateProjectV2ItemFieldValue(input: {
+            projectId: $projectId,
+            itemId: $itemId,
+            fieldId: $fieldId,
+            value: { singleSelectOptionId: $optionId }
+          }) {
+            projectV2Item { id }
+          }
+        }
+      `,
+      variables: {
+        projectId: PROJECT_ID,
+        itemId: projectItemId,
+        fieldId: SAKSSTATUS_FIELD_ID,
+        optionId: SAKSSTATUS_NY_OPTION_ID,
+      },
+    }),
+  });
+  return res.json();
+}
+
 
 export async function onRequestPost(context) {
   const { request, env } = context;
@@ -263,6 +295,11 @@ export async function onRequestPost(context) {
           areaErrors: areaResult.errors,
         });
       }
+    }
+
+    // 7b) Sett Saksstatus = "Ny" — ikke kritisk om det feiler
+    if (SAKSSTATUS_FIELD_ID && SAKSSTATUS_NY_OPTION_ID && projectItemId) {
+      await setSaksstatusNy(projectItemId, GITHUB_TOKEN);
     }
 
     return json(200, {
